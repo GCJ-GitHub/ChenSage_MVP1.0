@@ -238,6 +238,7 @@ def generate_daily_report(
 
     scope = body.scope
     scope_label = "全部"
+    scope_title_label = "全部"
     if scope == "latest_batch":
         # 找该方向最新的 batch_id
         latest = db.query(ArxivPaper.batch_id).filter(
@@ -247,9 +248,11 @@ def generate_daily_report(
         if latest and latest[0]:
             q = q.filter(ArxivPaper.batch_id == latest[0])
         scope_label = "本次拉取"
+        scope_title_label = "本次拉取"
     elif scope == "starred":
         q = q.filter(ArxivPaper.is_starred == True)
         scope_label = "收藏"
+        scope_title_label = "仅收藏"
 
     papers = q.order_by(ArxivPaper.published_at.desc())
     if scope == "all" and body.max_papers:
@@ -283,9 +286,13 @@ def generate_daily_report(
         if default_model:
             config_id = default_model.id
 
+    generated_at = datetime.now(timezone.utc)
+    run_label = generated_at.strftime("%H%M%S")
+    report_title = f"arXiv 日报 - {d.name} - {scope_title_label} - {len(papers)}篇 - {report_date} {run_label}"
+
     report_task = Task(
         type="arxiv_daily",
-        title=f"arXiv 日报 - {d.name} ({report_date})",
+        title=report_title,
         description=f"研究方向「{d.name}」的每日论文简报",
         model_config_id=config_id,
         input={
@@ -295,6 +302,10 @@ def generate_daily_report(
             "direction_id": direction_id,
             "report_date": report_date,
             "paper_count": len(papers),
+            "report_title": report_title,
+            "scope": scope,
+            "scope_label": scope_title_label,
+            "generated_at": generated_at.isoformat(),
             "template_id": body.template_id or "",
             "override_max_tokens": 16384,
         },
@@ -326,7 +337,7 @@ def list_reports(
         q = q.filter(ArxivDailyReport.direction_id == direction_id)
     if date_from:
         q = q.filter(ArxivDailyReport.report_date >= date_from)
-    items = q.order_by(ArxivDailyReport.report_date.desc()).limit(30).all()
+    items = q.order_by(ArxivDailyReport.report_date.desc(), ArxivDailyReport.created_at.desc()).limit(30).all()
     return {
         "success": True,
         "data": {"reports": [ArxivReportResponse.model_validate(r).model_dump() for r in items]},

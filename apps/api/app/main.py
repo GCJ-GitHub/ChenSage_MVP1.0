@@ -47,6 +47,42 @@ def ensure_sqlite_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE arxiv_papers ADD COLUMN batch_id VARCHAR(36)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_arxiv_papers_batch_id ON arxiv_papers (batch_id)"))
 
+    if inspector.has_table("arxiv_daily_reports"):
+        with engine.begin() as conn:
+            table_sql = conn.execute(text(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='arxiv_daily_reports'"
+            )).scalar() or ""
+            if "unique_direction_report_date" in table_sql:
+                conn.execute(text("DROP TABLE IF EXISTS arxiv_daily_reports_old"))
+                conn.execute(text("ALTER TABLE arxiv_daily_reports RENAME TO arxiv_daily_reports_old"))
+                conn.execute(text("""
+                    CREATE TABLE arxiv_daily_reports (
+                        id VARCHAR(36) NOT NULL,
+                        direction_id VARCHAR(36) NOT NULL,
+                        report_date DATE NOT NULL,
+                        title VARCHAR(512) NOT NULL,
+                        content TEXT NOT NULL,
+                        paper_count INTEGER NOT NULL,
+                        recommended_count INTEGER NOT NULL,
+                        status VARCHAR(32) NOT NULL,
+                        error_message TEXT,
+                        created_at DATETIME NOT NULL,
+                        PRIMARY KEY (id)
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO arxiv_daily_reports (
+                        id, direction_id, report_date, title, content, paper_count,
+                        recommended_count, status, error_message, created_at
+                    )
+                    SELECT
+                        id, direction_id, report_date, title, content, paper_count,
+                        recommended_count, status, error_message, created_at
+                    FROM arxiv_daily_reports_old
+                """))
+                conn.execute(text("DROP TABLE arxiv_daily_reports_old"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_arxiv_daily_reports_direction_id ON arxiv_daily_reports (direction_id)"))
+
 
 ensure_sqlite_schema_compatibility()
 

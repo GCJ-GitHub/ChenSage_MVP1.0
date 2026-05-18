@@ -1,12 +1,11 @@
 from datetime import datetime
-from sqlalchemy import String, Text, Date, Integer, DateTime, UniqueConstraint
+from sqlalchemy import String, Text, Date, Integer, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, gen_uuid, utcnow
 
 
 class ArxivDailyReport(Base):
     __tablename__ = "arxiv_daily_reports"
-    __table_args__ = (UniqueConstraint("direction_id", "report_date", name="unique_direction_report_date"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     direction_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)

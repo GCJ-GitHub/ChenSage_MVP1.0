@@ -149,30 +149,18 @@ class TaskExecutor:
 
             raw_date = variables.get("report_date") or date.today().isoformat()
             report_date = date.fromisoformat(raw_date) if isinstance(raw_date, str) else raw_date
-            title = task.title or f"arXiv 日报 - {raw_date}"
+            title = variables.get("report_title") or task.title or f"arXiv 日报 - {raw_date}"
             paper_count = int(variables.get("paper_count") or 0)
 
-            existing = db.query(ArxivDailyReport).filter(
-                ArxivDailyReport.direction_id == direction_id,
-                ArxivDailyReport.report_date == report_date,
-            ).first()
-            if existing:
-                existing.title = title
-                existing.content = task.output or ""
-                existing.paper_count = paper_count
-                existing.recommended_count = paper_count
-                existing.status = "generated"
-                existing.error_message = None
-            else:
-                db.add(ArxivDailyReport(
-                    direction_id=direction_id,
-                    report_date=report_date,
-                    title=title,
-                    content=task.output or "",
-                    paper_count=paper_count,
-                    recommended_count=paper_count,
-                    status="generated",
-                ))
+            db.add(ArxivDailyReport(
+                direction_id=direction_id,
+                report_date=report_date,
+                title=title,
+                content=task.output or "",
+                paper_count=paper_count,
+                recommended_count=paper_count,
+                status="generated",
+            ))
             db.commit()
         except Exception as e:
             print(f"[WARN] save arxiv daily report failed: {e}")

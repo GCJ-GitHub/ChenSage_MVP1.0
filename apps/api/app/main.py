@@ -1,0 +1,71 @@
+import sys
+import os
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import get_settings
+from app.core.database import engine
+from app.db.base import Base
+from app.api.router import router as core_router
+from app.api.models_api import router as models_router
+from app.api.files_api import router as files_router
+from app.api.tasks_api import router as tasks_router
+from app.api.interview_api import router as interview_router
+from app.api.content_api import router as content_router
+from app.api.research_api import router as research_router
+from app.api.arxiv_api import router as arxiv_router
+from app.api.export_api import router as export_router
+from app.api.prompts_api import router as prompts_router
+from app.core.database import SessionLocal
+from app.services.task_executor import TaskExecutor
+
+settings = get_settings()
+
+os.makedirs(settings.upload_dir, exist_ok=True)
+os.makedirs(settings.export_dir, exist_ok=True)
+os.makedirs(settings.log_dir, exist_ok=True)
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    docs_url="/docs",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(core_router, prefix="/api/v1")
+app.include_router(models_router, prefix="/api/v1")
+app.include_router(files_router, prefix="/api/v1")
+app.include_router(tasks_router, prefix="/api/v1")
+app.include_router(interview_router, prefix="/api/v1")
+app.include_router(content_router, prefix="/api/v1")
+app.include_router(research_router, prefix="/api/v1")
+app.include_router(arxiv_router, prefix="/api/v1")
+app.include_router(export_router, prefix="/api/v1")
+app.include_router(prompts_router, prefix="/api/v1")
+
+
+@app.get("/")
+def root():
+    return {"app": settings.app_name, "version": "0.1.0", "docs": "/docs"}
+
+
+@app.on_event("startup")
+def cleanup_stale_tasks_on_startup():
+    db = SessionLocal()
+    try:
+        TaskExecutor.mark_stale_tasks(db)
+    finally:
+        db.close()

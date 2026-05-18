@@ -23,4 +23,5 @@ class ArxivPaper(Base):
     relevance_score: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
     recommendation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    batch_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

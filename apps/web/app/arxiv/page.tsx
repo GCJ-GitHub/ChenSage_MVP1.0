@@ -29,6 +29,7 @@ interface Paper {
   published_at: string | null;
   categories: string[] | null;
   is_starred: boolean;
+  batch_id: string | null;
 }
 
 interface Report {
@@ -54,6 +55,8 @@ const CATEGORIES = [
   "stat.ML", "math.OC", "q-bio.NC", "q-fin.ST", "eess.IV", "eess.AS",
 ];
 
+type ReportScope = "latest_batch" | "starred" | "all";
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function ArxivPage() {
@@ -69,7 +72,10 @@ export default function ArxivPage() {
   const [starFilter, setStarFilter] = useState(false);
   const [modelConfigId, setModelConfigId] = useState("");
   const [templateId, setTemplateId] = useState("");
-  const [maxPapers, setMaxPapers] = useState(20);
+  const [fetchDate, setFetchDate] = useState("");
+  const [fetchMaxResults, setFetchMaxResults] = useState(20);
+  const [maxPapers, setMaxPapers] = useState(50);
+  const [scope, setScope] = useState<ReportScope>("latest_batch");
   const [reportDate, setReportDate] = useState(today());
   const [reportPreview, setReportPreview] = useState("");
   const [reportTaskId, setReportTaskId] = useState("");
@@ -86,6 +92,8 @@ export default function ArxivPage() {
   const latestDate = papers[0]?.published_at ? new Date(papers[0].published_at).toLocaleDateString("zh-CN") : "暂无";
   const selectedReport = reports.find((report) => report.id === selectedReportId);
   const visibleReport = reportPreview || selectedReport?.content || "";
+  const latestBatchId = papers.find((paper) => paper.batch_id)?.batch_id || "";
+  const latestBatchCount = latestBatchId ? papers.filter((paper) => paper.batch_id === latestBatchId).length : 0;
 
   const loadDirections = useCallback(async () => {
     setLoading("directions");
@@ -205,7 +213,10 @@ export default function ArxivPage() {
     setStatusMsg("");
     setLoading("fetch");
     try {
-      const res = await api.post<{ data: { fetched_count: number; new_count: number }; message: string }>(`/arxiv/directions/${selectedDir}/fetch`);
+      const res = await api.post<{ data: { fetched_count: number; new_count: number }; message: string }>(`/arxiv/directions/${selectedDir}/fetch`, {
+        fetch_date: fetchDate || undefined,
+        max_results: Math.min(100, Math.max(1, fetchMaxResults || 20)),
+      });
       setStatusMsg(res.message);
       await loadPapers();
       await loadDirections();
@@ -231,7 +242,8 @@ export default function ArxivPage() {
     try {
       const res = await api.post<{ data: { task_id: string } }>(`/arxiv/directions/${selectedDir}/daily-report`, {
         report_date: reportDate,
-        max_papers: maxPapers,
+        scope,
+        max_papers: scope === "all" ? maxPapers : undefined,
         model_config_id: modelConfigId || undefined,
         template_id: templateId || undefined,
       });
@@ -367,9 +379,33 @@ export default function ArxivPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button onClick={fetchLatest} disabled={!selectedDir || loading === "fetch"} className={btn}>{loading === "fetch" ? "拉取中..." : "拉取最新论文"}</button>
+                <button onClick={fetchLatest} disabled={!selectedDir || loading === "fetch"} className={btn}>{loading === "fetch" ? "拉取中..." : "拉取论文"}</button>
                 <button onClick={() => setStarFilter(!starFilter)} disabled={!selectedDir} className={starFilter ? btn : secBtn}>{starFilter ? "仅看收藏" : "全部论文"}</button>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-[180px_140px_auto] gap-3 mt-4 items-end">
+              <div>
+                <label className={`block text-xs mb-1 ${t.textMuted}`}>拉取日期</label>
+                <input className={inp} type="date" value={fetchDate} onChange={(e) => setFetchDate(e.target.value)} />
+                <p className={`mt-1 text-[11px] ${t.textMuted}`}>不填则按 arXiv 最新排序拉取</p>
+              </div>
+              <div>
+                <label className={`block text-xs mb-1 ${t.textMuted}`}>拉取篇数</label>
+                <input
+                  className={inp}
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={fetchMaxResults}
+                  onChange={(e) => setFetchMaxResults(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+                />
+              </div>
+              {fetchDate && (
+                <button type="button" onClick={() => setFetchDate("")} className={secBtn}>
+                  恢复最新
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-3 mt-4">
@@ -395,8 +431,26 @@ export default function ArxivPage() {
                 </select>
               </div>
               <div>
-                <label className={`block text-xs mb-1 ${t.textMuted}`}>论文数量</label>
-                <input className={inp} type="number" min={1} max={50} value={maxPapers} onChange={(e) => setMaxPapers(Number(e.target.value))} />
+                <label className={`block text-xs mb-1 ${t.textMuted}`}>论文范围</label>
+                <div className="flex flex-col gap-1">
+                  {[
+                    ["latest_batch", "本次拉取", latestBatchCount],
+                    ["starred", "仅收藏", papers.filter(p => p.is_starred).length],
+                    ["all", "全部", papers.length],
+                  ].map(([val, label, count]) => (
+                    <label key={val} className={`flex items-center gap-2 text-sm cursor-pointer ${scope === val ? t.text : t.textMuted}`}>
+                      <input type="radio" name="scope" checked={scope === val} onChange={() => setScope(val as ReportScope)} className="accent-sky-500" />
+                      {label} ({count}篇)
+                    </label>
+                  ))}
+                </div>
+                {scope === "all" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className={`text-xs ${t.textMuted}`}>取前</span>
+                    <input className={`w-16 text-center ${inp}`} type="number" min={1} max={50} value={maxPapers} onChange={(e) => setMaxPapers(Math.min(50, Math.max(1, Number(e.target.value) || 1)))} />
+                    <span className={`text-xs ${t.textMuted}`}>篇</span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap items-end gap-3 mt-3">

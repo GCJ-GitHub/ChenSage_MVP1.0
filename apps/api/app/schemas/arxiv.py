@@ -42,9 +42,15 @@ class ArxivDirectionResponse(BaseModel):
 
 class DailyReportRequest(BaseModel):
     report_date: Optional[str] = None
-    max_papers: int = Field(default=20, ge=1, le=50)
+    scope: str = Field(default="latest_batch", pattern="^(latest_batch|starred|all)$")
+    max_papers: Optional[int] = Field(default=None, ge=1, le=50)
     model_config_id: Optional[str] = None
     template_id: Optional[str] = None
+
+
+class ArxivFetchRequest(BaseModel):
+    fetch_date: Optional[str] = None
+    max_results: int = Field(default=20, ge=1, le=100)
 
 
 class ArxivPaperBrief(BaseModel):
@@ -61,6 +67,7 @@ class ArxivPaperBrief(BaseModel):
     relevance_score: Optional[float] = None
     recommendation_reason: Optional[str] = None
     is_starred: bool
+    batch_id: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

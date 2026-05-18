@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.core.database import engine
@@ -30,6 +31,24 @@ os.makedirs(settings.export_dir, exist_ok=True)
 os.makedirs(settings.log_dir, exist_ok=True)
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_sqlite_schema_compatibility() -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    if not inspector.has_table("arxiv_papers"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("arxiv_papers")}
+    if "batch_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE arxiv_papers ADD COLUMN batch_id VARCHAR(36)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_arxiv_papers_batch_id ON arxiv_papers (batch_id)"))
+
+
+ensure_sqlite_schema_compatibility()
 
 app = FastAPI(
     title=settings.app_name,

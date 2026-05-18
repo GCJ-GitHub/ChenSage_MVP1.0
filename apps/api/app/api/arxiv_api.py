@@ -1,8 +1,8 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, date, time, timedelta, timezone
-import threading, json
+from datetime import datetime, date, time, timezone
+import threading, uuid
 
 from app.core.database import get_db
 from app.models.arxiv_direction import ArxivDirection
@@ -12,7 +12,7 @@ from app.models.task import Task
 from app.models.model_config import ModelConfig
 from app.schemas.arxiv import (
     ArxivDirectionCreate, ArxivDirectionUpdate, ArxivDirectionResponse,
-    DailyReportRequest, ArxivPaperBrief, ArxivReportResponse,
+    DailyReportRequest, ArxivFetchRequest, ArxivPaperBrief, ArxivReportResponse,
 )
 from app.services.arxiv_service import build_query, fetch_papers
 from app.services.task_executor import TaskExecutor
@@ -98,23 +98,30 @@ def delete_direction(
 @router.post("/directions/{direction_id}/fetch")
 def fetch_papers_for_direction(
     direction_id: str,
+    body: ArxivFetchRequest | None = None,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     d = db.query(ArxivDirection).filter(ArxivDirection.id == direction_id).first()
     if not d:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "研究方向不存在"})
 
+    body = body or ArxivFetchRequest()
     try:
         query = build_query(
             d.keywords or [],
             d.categories or [],
             d.exclude_keywords or [],
         )
-        papers = fetch_papers(query, max_results=20)
+        if body.fetch_date:
+            query = _append_submitted_date_filter(query, body.fetch_date)
+        papers = fetch_papers(query, max_results=body.max_results)
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "BAD_REQUEST", "message": str(e)})
     except Exception as e:
         raise HTTPException(502, detail={"code": "ARXIV_FETCH_FAILED", "message": f"arXiv 拉取失败: {str(e)[:200]}"})
 
     new_count = 0
+    batch_id = str(uuid.uuid4())
     for p in papers:
         existing = db.query(ArxivPaper).filter(
             ArxivPaper.direction_id == direction_id,
@@ -132,15 +139,33 @@ def fetch_papers_for_direction(
                 published_at=_parse_dt(p["published_at"]),
                 updated_at_arxiv=_parse_dt(p["updated_at_arxiv"]),
                 categories=p["categories"],
+                batch_id=batch_id,
             ))
             new_count += 1
+        else:
+            existing.title = p["title"]
+            existing.authors = p["authors"]
+            existing.abstract = p["abstract"]
+            existing.pdf_url = p["pdf_url"]
+            existing.abs_url = p["abs_url"]
+            existing.published_at = _parse_dt(p["published_at"])
+            existing.updated_at_arxiv = _parse_dt(p["updated_at_arxiv"])
+            existing.categories = p["categories"]
+            existing.batch_id = batch_id
 
     d.last_run_at = datetime.now(timezone.utc)
     db.commit()
 
     return {
         "success": True,
-        "data": {"direction_id": direction_id, "fetched_count": len(papers), "new_count": new_count},
+        "data": {
+            "direction_id": direction_id,
+            "fetched_count": len(papers),
+            "new_count": new_count,
+            "batch_id": batch_id,
+            "fetch_date": body.fetch_date or None,
+            "max_results": body.max_results,
+        },
         "message": f"拉取完成，共 {len(papers)} 篇（{new_count} 篇新增）",
     }
 
@@ -209,23 +234,35 @@ def generate_daily_report(
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "研究方向不存在"})
 
     report_date = body.report_date or date.today().isoformat()
-    try:
-        report_day = date.fromisoformat(report_date)
-    except ValueError:
-        raise HTTPException(400, detail={"code": "BAD_REQUEST", "message": "report_date 格式应为 YYYY-MM-DD"})
+    q = db.query(ArxivPaper).filter(ArxivPaper.direction_id == direction_id)
 
-    start_dt = datetime.combine(report_day, time.min)
-    end_dt = start_dt + timedelta(days=1)
-    papers = (
-        db.query(ArxivPaper)
-        .filter(ArxivPaper.direction_id == direction_id)
-        .filter(ArxivPaper.published_at >= start_dt, ArxivPaper.published_at < end_dt)
-        .order_by(ArxivPaper.published_at.desc())
-        .limit(body.max_papers)
-        .all()
-    )
+    scope = body.scope
+    scope_label = "全部"
+    if scope == "latest_batch":
+        # 找该方向最新的 batch_id
+        latest = db.query(ArxivPaper.batch_id).filter(
+            ArxivPaper.direction_id == direction_id,
+            ArxivPaper.batch_id != None
+        ).order_by(ArxivPaper.created_at.desc()).first()
+        if latest and latest[0]:
+            q = q.filter(ArxivPaper.batch_id == latest[0])
+        scope_label = "本次拉取"
+    elif scope == "starred":
+        q = q.filter(ArxivPaper.is_starred == True)
+        scope_label = "收藏"
+
+    papers = q.order_by(ArxivPaper.published_at.desc())
+    if scope == "all" and body.max_papers:
+        papers = papers.limit(body.max_papers)
+    papers = papers.all()
+
     if not papers:
-        raise HTTPException(400, detail={"code": "BAD_REQUEST", "message": f"该方向在 {report_date} 没有已拉取论文，请先拉取或选择有论文的日期"})
+        msg = f"该方向没有{scope_label}论文"
+        if scope == "starred":
+            msg += "，请先收藏论文"
+        elif scope == "latest_batch":
+            msg += "，请先拉取论文"
+        raise HTTPException(400, detail={"code": "BAD_REQUEST", "message": msg})
 
     paper_text = "\n\n---\n\n".join([
         f"### {i+1}. {p.title}\n"
@@ -306,3 +343,13 @@ def _parse_dt(val: str | None) -> datetime | None:
         return datetime.fromisoformat(val.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _append_submitted_date_filter(query: str, fetch_date: str) -> str:
+    try:
+        day = date.fromisoformat(fetch_date)
+    except ValueError:
+        raise ValueError("fetch_date 格式应为 YYYY-MM-DD")
+
+    ymd = day.strftime("%Y%m%d")
+    return f"{query}+AND+submittedDate:[{ymd}0000+TO+{ymd}2359]"

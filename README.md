@@ -42,7 +42,7 @@ ChenSage_MVP1.0 的目标是提供一个可扩展的 AI 工作台：
 ## 目录结构
 
 ```text
-ChenSage/
+ChenSage_MVP1.0/
   apps/
     api/                 FastAPI 后端
       app/
@@ -99,14 +99,14 @@ ChenSage/
 ### 方式二：WSL 命令
 
 ```bash
-cd /mnt/d/Desktop/ChenSage
+cd /mnt/d/Desktop/ChenSage_MVP1.0
 bash start.sh
 ```
 
 关闭：
 
 ```bash
-cd /mnt/d/Desktop/ChenSage
+cd /mnt/d/Desktop/ChenSage_MVP1.0
 bash stop.sh --no-prompt
 ```
 

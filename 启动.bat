@@ -8,7 +8,7 @@ echo.
 echo Starting services via WSL...
 echo.
 
-wsl bash "/mnt/d/Desktop/ChenSage/start.sh"
+wsl bash "/mnt/d/Desktop/ChenSage_MVP1.0/start.sh"
 
 echo.
 echo Press any key to close this window...

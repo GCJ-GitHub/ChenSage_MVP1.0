@@ -90,6 +90,28 @@ release_port() {
 }
 
 # ---------- 加载 nvm ----------
+ensure_web_deps() {
+    cd "$WEB_DIR" || exit 1
+
+    if [ ! -d "node_modules" ]; then
+        warn "Frontend node_modules not found, running npm install..."
+        if ! npm install >> "$LOG_DIR/web/npm-install.log" 2>&1; then
+            err "Frontend npm install failed. See $LOG_DIR/web/npm-install.log"
+            exit 1
+        fi
+        return 0
+    fi
+
+    node -e 'require("lightningcss"); require("next/package.json")' >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        warn "Frontend native packages do not match the current OS, running npm install..."
+        if ! npm install >> "$LOG_DIR/web/npm-install.log" 2>&1; then
+            err "Frontend npm install failed. See $LOG_DIR/web/npm-install.log"
+            exit 1
+        fi
+    fi
+}
+
 export NVM_DIR="$HOME/.nvm"
 if [ -s "$NVM_DIR/nvm.sh" ]; then
     \. "$NVM_DIR/nvm.sh"
@@ -174,6 +196,7 @@ release_port 3000 "Next.js"
 
 cd "$WEB_DIR"
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+ensure_web_deps
 npm run dev > "$LOG_DIR/web/server.log" 2>&1 &
 WEB_PID=$!
 echo "$WEB_PID" > "$LOG_DIR/web.pid"
